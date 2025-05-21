@@ -1,0 +1,358 @@
+---
+title: "Anxiety EMA Main Analyses"
+author: "Jihyun Hur"
+date: "2025-05-19"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r 1, include=FALSE}
+
+rm(list=ls())
+library(readxl)
+library(performance)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(tidyverse)
+library(ggpubr)
+library(broom)
+library(robustbase)
+library(ppcor)
+library(lattice)
+library(mediation)
+library(ggeffects)
+library(jtools)
+library(sensemakr)
+library(lme4)
+library(nlme)
+library(plm)
+library(cowplot)
+library(lmtest)
+library(pracma)
+library(mlVAR)
+library(qgraph)
+library(psych)
+library(DHARMa)
+library(glmmTMB)
+library(MASS)
+library(robustlmm)
+library(brms)
+library(patchwork)
+library(emmeans)
+
+
+# Set wd
+cur_dir <- '/Users/jihyunhur/Yale/2_Github/project_anxiety_news/2_analysis'
+dat_dir <- '/Users/jihyunhur/Yale/2_Github/project_anxiety_news/1_data'
+
+# Load data
+data <- data.frame(read_csv(file.path(dat_dir, 'project_anxiety_EMA_curated_data.csv')))
+
+## Create summary data 
+summary_data <- data %>% group_by(ID) %>% summarise(baseline_anxiety_score = unique(baseline_anxiety_score),
+                                                    mean_anxiety_score = unique(mean_anxiety_score),
+                                                    mean_info_seek = unique(mean_info_seek))
+## Factorize gender group
+data$gender <- factor(data$gender,levels = c("1","2","3"), labels = c("Male", "Female", "Nonbinary"))
+data$race_category <- factor(data$race_category)
+
+```
+
+## H1
+### Correlation between anxiety and information-seeking
+```{r h1}
+cor.test(summary_data$baseline_anxiety_score, summary_data$mean_info_seek)
+
+cor.test(summary_data$mean_anxiety_score, summary_data$mean_info_seek)
+```
+
+## H2
+### Multilevel Regression: Daily Anxiety ~ Daily Information-Seeking
+```{r h2}
+ctrl <- lmeControl(opt='optim')
+
+h2_base_model <- lme(daily_anxiety_score ~ 
+                       time + person_centered_info_seek + daily_info_seek + 
+                       race_category + current_treat,
+                     random = ~ 1 + daily_info_seek | ID, 
+                     control=ctrl, 
+                     data = data, 
+                     na.action = na.exclude)
+
+# Table 2
+summary(h2_base_model)
+
+h2_full_model <- lme(daily_anxiety_score~ 
+                       time + person_centered_info_seek + daily_info_seek + 
+                       race_category + current_treat +
+                       age + gender + edu,
+                     random = ~ 1 + daily_info_seek | ID, 
+                     control=ctrl, 
+                     data = data, 
+                     na.action = na.exclude)
+
+# Supplementary Table 1
+summary(h2_full_model)
+
+```
+
+## H3-1
+### Multilevel Regression: Daily Anxiety ~ Daily Emotion Regulation*Daily Information-Seeking
+#### Brooding
+```{r h3-1 brooding MS}
+ctrl <- lmeControl(opt='optim')
+
+h3_brood_base_model <- lme(daily_anxiety_score ~ 
+                       time + person_centered_info_seek + person_centered_brood_sum_score +
+                       daily_info_seek*daily_brood_sum_score +
+                       race_category + current_treat,
+                     random = ~ 1 + daily_info_seek + daily_brood_sum_score | ID, 
+                     control=ctrl, 
+                     data = data,
+                     na.action = na.exclude)
+
+# Table 3 - Brooding
+summary(h3_brood_base_model)
+
+# Figure 1
+## Figure 1A
+ms_fig_1a_predict <- ggpredict(h3_brood_base_model, c("daily_info_seek", "daily_brood_sum_score[meansd]"))
+
+ms_fig_1a <- plot(ms_fig_1a_predict) + xlab('Daily COVID-19 Information-Seeking') + 
+  ylab('Daily Anxiety Score') +
+  scale_colour_brewer(palette = "Set1", labels = c("-1 SD", "Mean", "+1 SD")) + 
+  scale_fill_brewer(palette = "Set1") +
+  theme_classic() + theme(legend.position = "top") + 
+  ggtitle("") + labs(colour = "Daily Brooding") +
+  theme(plot.margin = margin(t = 10, r = 5, b = 5, l = 5))
+
+## Figure 1B
+ms_fig_1b_predict <- ggeffects::ggpredict(h3_brood_base_model, c("daily_info_seek"))
+ms_fig_1b <- plot(ms_fig_1b_predict) + xlab('Daily COVID-19 Information-Seeking') + 
+  ylab('Daily Anxiety Score') + 
+  geom_point(aes(color = "dummy_legend_label"), alpha = 0, size = 0) +
+  theme_classic() + 
+  # Below code is mainly for formatting
+  scale_color_discrete(
+    name   = " ",                     
+    breaks = "dummy_legend_label",   
+    labels = " ",                      
+    guide  = guide_legend(
+      override.aes = list(
+        shape = NA,   
+        color = NA,    
+        fill  = NA,    
+        alpha = 0     
+      )
+    )
+  ) + 
+  ggtitle("") + theme(legend.position = "top")
+
+ggarrange(ms_fig_1a, ms_fig_1b, ncol = 2, nrow=1)
+
+# Simple Slope Analysis
+zvals <- c(-1.53, 0, 1.53) 
+emtrends(h3_brood_base_model, specs="daily_brood_sum_score", var ="daily_info_seek", at = list(daily_brood_sum_score = zvals)) |> test()
+
+```
+
+```{r h3-1 brooding SI}
+ctrl <- lmeControl(opt='optim')
+
+h3_brood_full_model <- lme(daily_anxiety_score ~ 
+                             time + person_centered_info_seek + person_centered_brood_sum_score +
+                             daily_info_seek*daily_brood_sum_score +
+                             race_category + current_treat +
+                             age + gender + edu,
+                     random = ~ 1 + daily_info_seek + daily_brood_sum_score | ID, 
+                     control=ctrl, 
+                     data = data, 
+                     na.action = na.exclude)
+
+# Table S2 - Brooding
+summary(h3_brood_full_model)
+
+# Figure S2
+data_fig <- data %>%
+  mutate(daily_brood_sum_score_group = case_when(
+    daily_brood_sum_score < -1.53 ~ "-1 SD",
+    daily_brood_sum_score >= -1.53 & daily_brood_sum_score < 1.53 ~ "Mean",
+    daily_brood_sum_score >= 1.53 ~ "+1 SD"
+  )) %>% filter(!is.na(daily_brood_sum_score_group))
+
+data_fig$daily_brood_sum_score_group <- factor(data_fig$daily_brood_sum_score_group, levels = c("-1 SD", "Mean", "+1 SD"))
+
+data_fig %>%
+  ggplot(aes(x = daily_info_seek, y = daily_brood_sum_score)) +
+  geom_point(
+    alpha = 0.5,
+    aes(shape = daily_brood_sum_score_group, color = daily_brood_sum_score_group),
+    size=2
+  ) + 
+  ylim(c(-11, 12)) +
+  scale_colour_brewer(palette = "Set1", labels = c("-1 SD", "Mean", "+1 SD")) +
+  scale_shape_manual(
+    values = c("-1 SD" = 16, "Mean" = 17, "+1 SD" = 15),  
+    labels = c("-1 SD", "Mean", "+1 SD"),
+    na.translate = FALSE
+  ) +   
+  theme_pubr() +
+  theme(legend.position = "right") +  
+  labs(
+    colour = "Daily Brooding",
+    shape = "Daily Brooding"
+  ) + 
+  geom_hline(yintercept = 0, linewidth = 0.8, linetype = 2) +
+  geom_vline(xintercept = 0, linewidth = 0.8, linetype = 2) +
+  ylab("Daily Brooding (Centered)") +
+  xlab("Daily Information-Seeking (Centered)")
+
+```
+
+## H3-2
+### Multilevel Regression: Daily Anxiety ~ Daily Emotion Regulation*Daily Information-Seeking
+#### Dampening
+```{r h3-2 dampening MS}
+ctrl <- lmeControl(opt='optim')
+
+h3_dampen_base_model <- lme(daily_anxiety_score ~ 
+                       time + person_centered_info_seek + person_centered_dampen_sum_score +
+                       daily_info_seek*daily_dampen_sum_score +
+                       race_category + current_treat,
+                     random = ~ 1 + daily_info_seek + daily_dampen_sum_score | ID, 
+                     control=ctrl, 
+                     data = data, 
+                     na.action = na.exclude)
+
+# Table 3 - Dampening
+summary(h3_dampen_base_model)
+
+# Figure S3
+## Figure S3A
+ms_fig_s3a_predict <- ggeffects::ggpredict(h3_dampen_base_model, c("daily_info_seek", "daily_dampen_sum_score[meansd]"))
+
+ms_fig_s3a <- plot(ms_fig_s3a_predict) + xlab('Daily COVID-19 Information-Seeking') + 
+  ylab('Daily Anxiety Score') +
+  scale_colour_brewer(palette = "Set1", labels = c("-1 SD", "Mean", "+1 SD")) + 
+  scale_fill_brewer(palette = "Set1") +
+  theme_classic() + theme(legend.position = "top") + 
+  ggtitle("") + labs(colour = "Daily Dampening") +
+  theme(plot.margin = margin(t = 10, r = 5, b = 5, l = 5))
+
+
+## Figure S3B
+ms_fig_s3b_predict <- ggeffects::ggpredict(h3_dampen_base_model, c("daily_info_seek"))
+ms_fig_s3b <- plot(ms_fig_s3b_predict) + xlab('Daily COVID-19 Information-Seeking') + 
+  ylab('Daily Anxiety Score') + 
+  geom_point(aes(color = "dummy_legend_label"), alpha = 0, size = 0) +
+  theme_classic() + 
+  # Below code is mainly for formatting
+  scale_color_discrete(
+    name   = " ",                     
+    breaks = "dummy_legend_label",   
+    labels = " ",                      
+    guide  = guide_legend(
+      override.aes = list(
+        shape = NA,   
+        color = NA,    
+        fill  = NA,    
+        alpha = 0     
+      )
+    )
+  ) + 
+  ggtitle("") + theme(legend.position = "top")
+
+ggarrange(ms_fig_s3a, ms_fig_s3b, ncol = 2, nrow=1)
+
+# Simple Slope Analysis
+zvals <- c(-1.45, 0, 1.45) 
+emtrends(h3_dampen_base_model, specs="daily_dampen_sum_score", var ="daily_info_seek", at = list(daily_dampen_sum_score = zvals)) |> test()
+
+```
+
+
+```{r h3-2 dampening SI}
+ctrl <- lmeControl(opt='optim')
+
+h3_dampen_full_model <- lme(daily_anxiety_score ~ 
+                             time + person_centered_info_seek + person_centered_dampen_sum_score +
+                             daily_info_seek*daily_dampen_sum_score +
+                             race_category + current_treat +
+                             age + gender + edu,
+                     random = ~ 1 + daily_info_seek + daily_dampen_sum_score | ID, 
+                     control=ctrl, 
+                     data = data, 
+                     na.action = na.exclude)
+
+# Table S2 - Dampening
+summary(h3_dampen_full_model)
+```
+
+## eH4
+### Time-Lagged Multilevel Regression: Daily Anxiety (day t) ~ Daily Emotion Regulation (day t-1)*Daily Information-Seeking (day t-1)
+#### Brooding
+```{r eh4 brooding SI}
+ctrl <- lmeControl(opt='optim')
+
+# Add lagged data
+lagged_function <- function(dat, col_name, org_col) {
+  subjs <- unique(dat$ID)
+  dat <- dat %>%
+    mutate(time_numeric = as.numeric(stringr::str_extract(time, "\\d+")))
+  
+  dat <- dat %>%
+    group_by(ID) %>%
+    arrange(ID, survey_number) %>%
+    # Create a column to check if times are consecutive
+    mutate(
+      time_diff = c(NA, diff(survey_number, lag = 1)),
+      # Only assign lagged value if the time difference is 1 (consecutive)
+      !!col_name := ifelse(time_diff == 1, dplyr::lag(.data[[org_col]], 1), NA)
+    ) %>%
+    # Remove the helper columns
+    dplyr::select(-time_diff, -time_numeric) %>%
+    ungroup()
+  
+  return(dat)
+}
+
+cols <- c("daily_brood_sum_score", "daily_dampen_sum_score", "daily_info_seek", "daily_anxiety_score")
+
+for (col in cols) {
+  new_col_name <- paste0(col, "_lagged", sep="")
+  data <- lagged_function(data, new_col_name, col)
+}
+
+
+eh4_brood_base_model <- lme(daily_anxiety_score ~ daily_anxiety_score_lagged +
+                             time + person_centered_info_seek + person_centered_brood_sum_score +
+                             daily_info_seek_lagged*daily_brood_sum_score_lagged +
+                             race_category + current_treat,
+                     random = ~ 1 + daily_info_seek_lagged + daily_brood_sum_score_lagged  | ID, 
+                     control=ctrl, 
+                     data = data, 
+                     na.action = na.exclude)
+
+# Table S3 - Brooding
+summary(eh4_brood_base_model)
+
+```
+## Dampening
+```{r eh4 dampening SI}
+ctrl <- lmeControl(opt='optim')
+
+eh4_dampen_base_model <- lme(daily_anxiety_score ~ daily_anxiety_score_lagged +
+                             time + person_centered_info_seek + person_centered_dampen_sum_score +
+                             daily_info_seek_lagged*daily_dampen_sum_score_lagged +
+                             race_category + current_treat,
+                     random = ~ 1 + daily_info_seek_lagged + daily_dampen_sum_score_lagged  | ID, 
+                     control=ctrl, 
+                     data = data, 
+                     na.action = na.exclude)
+
+# Table S3 - Brooding
+summary(eh4_dampen_base_model)
+
+```
